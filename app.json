@@ -30,7 +30,8 @@
         {
           "enableFTS": true
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
