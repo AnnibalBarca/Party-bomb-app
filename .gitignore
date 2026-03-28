@@ -12,7 +12,7 @@ web-build/
 .DS_Store
 *.sqlite
 *.db
-assets/french-words.txt
+# assets/french-words.txt  # now bundled in app
 assets/dictionary.sql
 npm-debug.*
 yarn-debug.*

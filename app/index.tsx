@@ -6,73 +6,51 @@ import {
   StyleSheet,
   Animated,
   ScrollView,
-  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
-import { isDictionaryReady, getDictionarySize, importWords } from '../lib/database';
-import { SAMPLE_FRENCH_WORDS } from '../lib/sampleWords';
+import { isDictionaryReady, getDictionarySize, autoImportBundledDictionary } from '../lib/database';
+
+type DictStatus = 'checking' | 'importing' | 'ready';
 
 export default function HomeScreen() {
-  const [dictionaryStatus, setDictionaryStatus] = useState<'checking' | 'ready' | 'empty'>('checking');
+  const [dictStatus, setDictStatus] = useState<DictStatus>('checking');
   const [wordCount, setWordCount] = useState(0);
-  const [importing, setImporting] = useState(false);
-
+  const [importProgress, setImportProgress] = useState(0);
   const pulseAnim = new Animated.Value(1);
 
   useEffect(() => {
-    checkDictionary();
-
-    // Pulse animation for the bomb emoji
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.15, duration: 1000, useNativeDriver: true }),
         Animated.timing(pulseAnim, { toValue: 1.0, duration: 1000, useNativeDriver: true }),
       ])
     ).start();
+
+    checkAndImport();
   }, []);
 
-  async function checkDictionary() {
+  async function checkAndImport() {
     const ready = await isDictionaryReady();
     if (ready) {
       const count = await getDictionarySize();
       setWordCount(count);
-      setDictionaryStatus('ready');
+      setDictStatus('ready');
     } else {
-      setDictionaryStatus('empty');
+      // Auto-import the bundled 319k word list on first launch
+      setDictStatus('importing');
+      try {
+        const count = await autoImportBundledDictionary((pct) => setImportProgress(pct));
+        setWordCount(count);
+        setDictStatus('ready');
+      } catch (e) {
+        // Fallback: still allow play with in-memory words
+        setDictStatus('ready');
+      }
     }
-  }
-
-  async function loadSampleDictionary() {
-    setImporting(true);
-    try {
-      const count = await importWords(SAMPLE_FRENCH_WORDS);
-      setWordCount(count);
-      setDictionaryStatus('ready');
-    } catch (e) {
-      Alert.alert('Erreur', "Impossible de charger le dictionnaire.");
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  function handlePlay() {
-    if (dictionaryStatus !== 'ready') {
-      Alert.alert(
-        'Dictionnaire manquant',
-        'Chargez d\'abord le dictionnaire pour jouer.',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    router.push('/game');
   }
 
   return (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-    >
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <Animated.Text style={[styles.bombEmoji, { transform: [{ scale: pulseAnim }] }]}>
@@ -84,25 +62,33 @@ export default function HomeScreen() {
 
       {/* Dictionary status */}
       <View style={styles.statusCard}>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, dictionaryStatus === 'ready' ? styles.dotGreen : styles.dotRed]} />
-          <Text style={styles.statusText}>
-            {dictionaryStatus === 'checking' && 'Vérification du dictionnaire...'}
-            {dictionaryStatus === 'ready' && `Dictionnaire prêt — ${wordCount.toLocaleString('fr-FR')} mots`}
-            {dictionaryStatus === 'empty' && 'Dictionnaire non chargé'}
-          </Text>
-        </View>
+        {dictStatus === 'checking' && (
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, styles.dotYellow]} />
+            <Text style={styles.statusText}>Vérification du dictionnaire...</Text>
+          </View>
+        )}
 
-        {dictionaryStatus === 'empty' && (
-          <TouchableOpacity
-            style={[styles.importBtn, importing && styles.importBtnDisabled]}
-            onPress={loadSampleDictionary}
-            disabled={importing}
-          >
-            <Text style={styles.importBtnText}>
-              {importing ? '⏳ Chargement...' : '📥 Charger le dictionnaire de base'}
+        {dictStatus === 'importing' && (
+          <View style={styles.importingContainer}>
+            <View style={styles.statusRow}>
+              <View style={[styles.statusDot, styles.dotYellow]} />
+              <Text style={styles.statusText}>Import du dictionnaire ODS ({importProgress}%)...</Text>
+            </View>
+            <View style={styles.progressBar}>
+              <View style={[styles.progressFill, { width: `${importProgress}%` }]} />
+            </View>
+            <Text style={styles.importHint}>319 000 mots — première installation uniquement</Text>
+          </View>
+        )}
+
+        {dictStatus === 'ready' && (
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, styles.dotGreen]} />
+            <Text style={styles.statusText}>
+              {wordCount.toLocaleString('fr-FR')} mots chargés (ODS)
             </Text>
-          </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -119,7 +105,7 @@ export default function HomeScreen() {
         </View>
         <View style={styles.rule}>
           <Text style={styles.ruleIcon}>❤️</Text>
-          <Text style={styles.ruleText}>Vous avez 3 vies — chaque erreur ou timeout en enlève une</Text>
+          <Text style={styles.ruleText}>3 vies — chaque erreur ou timeout en enlève une</Text>
         </View>
         <View style={styles.rule}>
           <Text style={styles.ruleIcon}>🚀</Text>
@@ -129,21 +115,18 @@ export default function HomeScreen() {
 
       {/* Play button */}
       <TouchableOpacity
-        style={[styles.playBtn, dictionaryStatus !== 'ready' && styles.playBtnDisabled]}
-        onPress={handlePlay}
+        style={[styles.playBtn, dictStatus !== 'ready' && styles.playBtnDisabled]}
+        onPress={() => router.push('/game')}
+        disabled={dictStatus !== 'ready'}
         activeOpacity={0.8}
       >
         <Text style={styles.playBtnText}>
-          {dictionaryStatus === 'checking' ? '...' : '▶  JOUER'}
+          {dictStatus === 'ready' ? '▶  JOUER' : '⏳  Chargement...'}
         </Text>
       </TouchableOpacity>
 
-      {/* Settings link */}
-      <TouchableOpacity
-        style={styles.settingsLink}
-        onPress={() => router.push('/settings')}
-      >
-        <Text style={styles.settingsLinkText}>⚙️  Paramètres & Import dictionnaire</Text>
+      <TouchableOpacity style={styles.settingsLink} onPress={() => router.push('/settings')}>
+        <Text style={styles.settingsLinkText}>⚙️  Paramètres</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -160,18 +143,8 @@ const styles = StyleSheet.create({
   },
   header: { alignItems: 'center', marginBottom: 32 },
   bombEmoji: { fontSize: 72, marginBottom: 12 },
-  title: {
-    color: '#e2e8f0',
-    fontSize: 36,
-    fontWeight: '900',
-    letterSpacing: 8,
-  },
-  subtitle: {
-    color: '#64748b',
-    fontSize: 13,
-    marginTop: 6,
-    letterSpacing: 2,
-  },
+  title: { color: '#e2e8f0', fontSize: 36, fontWeight: '900', letterSpacing: 8 },
+  subtitle: { color: '#64748b', fontSize: 13, marginTop: 6, letterSpacing: 2 },
   statusCard: {
     width: '100%',
     backgroundColor: '#16213e',
@@ -181,28 +154,21 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
   dotGreen: { backgroundColor: '#00d68f' },
+  dotYellow: { backgroundColor: '#f5a623' },
   dotRed: { backgroundColor: '#ff3d71' },
-  statusText: { color: '#e2e8f0', fontSize: 14 },
-  importBtn: {
-    marginTop: 12,
+  statusText: { color: '#e2e8f0', fontSize: 14, flex: 1 },
+  importingContainer: { gap: 10 },
+  progressBar: {
+    height: 6,
     backgroundColor: '#0f3460',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
+    borderRadius: 3,
+    overflow: 'hidden',
   },
-  importBtnDisabled: { opacity: 0.5 },
-  importBtnText: { color: '#e2e8f0', fontSize: 14, fontWeight: '600' },
+  progressFill: { height: '100%', backgroundColor: '#f5a623', borderRadius: 3 },
+  importHint: { color: '#64748b', fontSize: 12 },
   rulesCard: {
     width: '100%',
     backgroundColor: '#16213e',
