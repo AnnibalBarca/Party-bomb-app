@@ -25,13 +25,8 @@
     "scheme": "partybomb",
     "plugins": [
       "expo-router",
-      [
-        "expo-sqlite",
-        {
-          "enableFTS": true
-        }
-      ],
-      "expo-asset"
+      ["expo-sqlite", { "enableFTS": true }],
+      ["expo-asset", { "assets": ["./assets/french-words.txt"] }]
     ]
   }
 }

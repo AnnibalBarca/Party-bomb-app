@@ -34,16 +34,20 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
 
 /**
  * Auto-import the bundled french-words.txt on first launch.
- * Streams the file in chunks to avoid memory spikes with 319k words.
+ * Uses multi-row INSERT batches for speed (~10-15s for 319k words).
  */
 export async function autoImportBundledDictionary(
   onProgress?: (pct: number) => void
 ): Promise<number> {
   const db = await getDatabase();
 
-  // Load asset from bundle
-  const [asset] = await Asset.loadAsync(require('../assets/french-words.txt'));
+  // Resolve bundled asset URI
+  const [asset] = await Asset.loadAsync(
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../assets/french-words.txt')
+  );
   const uri = asset.localUri ?? asset.uri;
+  if (!uri) throw new Error('Could not resolve french-words.txt asset URI');
 
   const content = await FileSystem.readAsStringAsync(uri, {
     encoding: FileSystem.EncodingType.UTF8,
@@ -54,18 +58,21 @@ export async function autoImportBundledDictionary(
     .map(w => w.trim().toLowerCase())
     .filter(w => w.length >= 2 && /^[a-záàâäéèêëîïôùûüçœæ'-]+$/i.test(w));
 
-  const CHUNK = 2000;
+  // Batch multi-row inserts: INSERT INTO mots (mot) VALUES (?),(?),...
+  const BATCH = 500;
   let imported = 0;
 
-  for (let i = 0; i < words.length; i += CHUNK) {
-    const batch = words.slice(i, i + CHUNK);
-    await db.withTransactionAsync(async () => {
-      for (const word of batch) {
-        await db.runAsync('INSERT OR IGNORE INTO mots (mot) VALUES (?)', [word]);
-        imported++;
-      }
-    });
-    onProgress?.(Math.round((i / words.length) * 100));
+  for (let i = 0; i < words.length; i += BATCH) {
+    const batch = words.slice(i, i + BATCH);
+    const placeholders = batch.map(() => '(?)').join(',');
+    await db.runAsync(
+      `INSERT OR IGNORE INTO mots (mot) VALUES ${placeholders}`,
+      batch
+    );
+    imported += batch.length;
+    onProgress?.(Math.round((imported / words.length) * 100));
+    // Yield to UI thread between batches
+    await new Promise(r => setTimeout(r, 0));
   }
 
   await db.runAsync(
