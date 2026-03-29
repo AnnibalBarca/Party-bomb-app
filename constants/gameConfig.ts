@@ -25,4 +25,14 @@ export const GAME_CONFIG = {
 
   /** SQLite database name */
   DB_NAME: 'bombparty.db',
+
+  /**
+   * Default max syllable coverage (nb de mots max qui contiennent la syllabe).
+   * 1000 = syllabes moyennement communes.
+   * Plus petit = plus rare/difficile. Plus grand = plus facile.
+   */
+  DEFAULT_MAX_SYLLABLE_COVERAGE: 1000,
+
+  /** AsyncStorage key for persisting the maxWords setting */
+  STORAGE_KEY_MAX_WORDS: '@bombparty:maxWords',
 } as const;

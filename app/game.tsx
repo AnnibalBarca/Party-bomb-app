@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useGame } from '../hooks/useGame';
+import { useSettings } from '../hooks/useSettings';
 import { BombTimer } from '../components/BombTimer';
 import { SyllableDisplay } from '../components/SyllableDisplay';
 import { WordInput } from '../components/WordInput';
@@ -16,7 +17,8 @@ import { LivesDisplay } from '../components/LivesDisplay';
 import { FeedbackBanner } from '../components/FeedbackBanner';
 
 export default function GameScreen() {
-  const { state, timerProgress, startGame, submitWord, pauseGame, resumeGame } = useGame();
+  const { settings } = useSettings();
+  const { state, timerProgress, startGame, submitWord, pauseGame, resumeGame } = useGame(settings.maxWords);
   const hasStarted = useRef(false);
 
   useEffect(() => {

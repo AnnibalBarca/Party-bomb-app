@@ -1,7 +1,7 @@
 import { useReducer, useCallback, useRef, useEffect } from 'react';
-import { GameState, GameAction, FeedbackType } from '../lib/types';
+import { GameState, GameAction } from '../lib/types';
 import { GAME_CONFIG } from '../constants/gameConfig';
-import { getNextSyllable } from '../constants/syllables';
+import { getNextSyllable } from '../constants/syllableData';
 import { validateWord } from '../lib/database';
 
 // ─── Initial State ────────────────────────────────────────────────────────────
@@ -143,7 +143,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useGame() {
+export function useGame(maxWords: number = GAME_CONFIG.DEFAULT_MAX_SYLLABLE_COVERAGE) {
   const [state, dispatch] = useReducer(gameReducer, INITIAL_STATE);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const TICK_MS = 100;
@@ -215,7 +215,7 @@ export function useGame() {
         GAME_CONFIG.BASE_SCORE_PER_WORD * timeBonus * (trimmed.length / 5)
       );
 
-      const nextSyllable = getNextSyllable(state.currentSyllable);
+      const nextSyllable = getNextSyllable(state.currentSyllable, maxWords);
       dispatch({
         type: 'SUBMIT_WORD',
         payload: {
