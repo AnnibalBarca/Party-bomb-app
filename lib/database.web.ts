@@ -1,12 +1,39 @@
 /**
- * Web stub for expo-sqlite — the real SQLite runs only on iOS/Android.
- * On web, we use a simple in-memory Set for word validation.
+ * Web implementation — uses in-memory Set loaded from the bundled french-words.txt.
+ * Replaces expo-sqlite (not available on web).
  */
-import { SAMPLE_FRENCH_WORDS } from './sampleWords';
+import { Asset } from 'expo-asset';
 import { GAME_CONFIG } from '../constants/gameConfig';
 
-const memoryDict = new Set<string>(SAMPLE_FRENCH_WORDS.map(w => w.toLowerCase()));
-let _ready = false;
+let memoryDict: Set<string> | null = null;
+let loadPromise: Promise<Set<string>> | null = null;
+
+async function getDictionary(): Promise<Set<string>> {
+  if (memoryDict) return memoryDict;
+  if (loadPromise) return loadPromise;
+
+  loadPromise = (async () => {
+    const [asset] = await Asset.loadAsync(
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../assets/french-words.txt')
+    );
+    // On web, asset.uri is a bundled URL — fetch it as text
+    const response = await fetch(asset.uri);
+    const text = await response.text();
+
+    const dict = new Set<string>();
+    text
+      .split('\n')
+      .map(w => w.trim().toLowerCase())
+      .filter(w => w.length >= 2 && /^[a-záàâäéèêëîïôùûüçœæ'-]+$/i.test(w))
+      .forEach(w => dict.add(w));
+
+    memoryDict = dict;
+    return dict;
+  })();
+
+  return loadPromise;
+}
 
 export async function getDatabase(): Promise<null> {
   return null;
@@ -26,7 +53,8 @@ export async function validateWord(
     return { valid: false, reason: `Le mot ne contient pas "${syllable.toUpperCase()}"` };
   }
 
-  if (!memoryDict.has(normalized)) {
+  const dict = await getDictionary();
+  if (!dict.has(normalized)) {
     return { valid: false, reason: `"${word}" n'est pas dans le dictionnaire` };
   }
 
@@ -34,15 +62,27 @@ export async function validateWord(
 }
 
 export async function importWords(words: string[]): Promise<number> {
-  words.forEach(w => memoryDict.add(w.trim().toLowerCase()));
-  _ready = true;
-  return memoryDict.size;
+  const dict = await getDictionary();
+  words.forEach(w => dict.add(w.trim().toLowerCase()));
+  return dict.size;
 }
 
 export async function isDictionaryReady(): Promise<boolean> {
-  return memoryDict.size > 0;
+  // Trigger load in background, report ready only when done
+  const dict = await getDictionary();
+  return dict.size > 0;
 }
 
 export async function getDictionarySize(): Promise<number> {
-  return memoryDict.size;
+  const dict = await getDictionary();
+  return dict.size;
+}
+
+export async function autoImportBundledDictionary(
+  onProgress?: (pct: number) => void
+): Promise<number> {
+  onProgress?.(50);
+  const dict = await getDictionary();
+  onProgress?.(100);
+  return dict.size;
 }
