@@ -78,6 +78,20 @@ export async function getDictionarySize(): Promise<number> {
   return dict.size;
 }
 
+/** Return up to `limit` words containing the given syllable (web: search in-memory) */
+export async function getWordsForSyllable(syllable: string, limit = 8): Promise<string[]> {
+  const dict = await getDictionary();
+  const syl = syllable.toLowerCase();
+  const results: string[] = [];
+  for (const word of dict) {
+    if (word.includes(syl)) {
+      results.push(word);
+      if (results.length >= limit) break;
+    }
+  }
+  return results.sort((a, b) => a.length - b.length);
+}
+
 export async function autoImportBundledDictionary(
   onProgress?: (pct: number) => void
 ): Promise<number> {

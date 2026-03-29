@@ -151,3 +151,13 @@ export async function getDictionarySize(): Promise<number> {
   const result = await db.getFirstAsync<{ n: number }>('SELECT COUNT(*) as n FROM mots');
   return result?.n ?? 0;
 }
+
+/** Return up to `limit` words containing the given syllable */
+export async function getWordsForSyllable(syllable: string, limit = 8): Promise<string[]> {
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<{ mot: string }>(
+    `SELECT mot FROM mots WHERE mot LIKE ? ORDER BY LENGTH(mot) ASC LIMIT ?`,
+    [`%${syllable.toLowerCase()}%`, limit]
+  );
+  return rows.map(r => r.mot);
+}

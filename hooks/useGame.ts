@@ -4,34 +4,35 @@ import { GAME_CONFIG } from '../constants/gameConfig';
 import { getNextSyllable } from '../constants/syllableData';
 import { validateWord } from '../lib/database';
 
-// ─── Initial State ────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const firstSyllable = getNextSyllable(null);
-
-const INITIAL_STATE: GameState = {
-  status: 'idle',
-  currentSyllable: firstSyllable,
-  timerMs: GAME_CONFIG.INITIAL_TIMER_MS,
-  maxTimerMs: GAME_CONFIG.INITIAL_TIMER_MS,
-  lives: GAME_CONFIG.INITIAL_LIVES,
-  score: 0,
-  wordsUsed: new Set(),
-  wordCount: 0,
-  feedbackType: null,
-  feedbackMessage: '',
-  lastWord: '',
-};
+function makeInitialState(timerMs: number): GameState {
+  return {
+    status: 'idle',
+    currentSyllable: getNextSyllable(null),
+    timerMs,
+    maxTimerMs: timerMs,
+    lives: GAME_CONFIG.INITIAL_LIVES,
+    score: 0,
+    wordsUsed: new Set(),
+    wordCount: 0,
+    feedbackType: null,
+    feedbackMessage: '',
+    lastWord: '',
+    lastFailedSyllable: null,
+  };
+}
 
 // ─── Reducer ──────────────────────────────────────────────────────────────────
 
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case 'START': {
-      const syllable = getNextSyllable(null);
+      const timerMs = action.payload?.initialTimerMs ?? GAME_CONFIG.INITIAL_TIMER_MS;
       return {
-        ...INITIAL_STATE,
+        ...makeInitialState(timerMs),
         status: 'playing',
-        currentSyllable: syllable,
+        currentSyllable: getNextSyllable(null),
         wordsUsed: new Set(),
       };
     }
@@ -39,15 +40,13 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     case 'TICK': {
       if (state.status !== 'playing') return state;
       const elapsed = action.payload?.elapsed ?? 100;
-      const newTimer = Math.max(0, state.timerMs - elapsed);
-      return { ...state, timerMs: newTimer };
+      return { ...state, timerMs: Math.max(0, state.timerMs - elapsed) };
     }
 
     case 'TIMEOUT': {
       if (state.status !== 'playing') return state;
       const newLives = state.lives - 1;
       const nextSyllable = getNextSyllable(state.currentSyllable);
-
       if (newLives <= 0) {
         return {
           ...state,
@@ -55,9 +54,9 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           lives: 0,
           feedbackType: 'timeout',
           feedbackMessage: 'Temps écoulé ! 💥',
+          lastFailedSyllable: state.currentSyllable,
         };
       }
-
       return {
         ...state,
         lives: newLives,
@@ -66,12 +65,12 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         feedbackType: 'timeout',
         feedbackMessage: `Temps écoulé ! -1 ❤️`,
         lastWord: '',
+        lastFailedSyllable: state.currentSyllable,
       };
     }
 
     case 'SUBMIT_WORD': {
       if (state.status !== 'playing') return state;
-
       const { correct, reason, word = '', syllable, score = 0 } = action.payload ?? {};
 
       if (!correct) {
@@ -84,6 +83,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
             feedbackType: 'wrong',
             feedbackMessage: reason ?? 'Mot invalide',
             lastWord: word,
+            lastFailedSyllable: state.currentSyllable,
           };
         }
         return {
@@ -92,17 +92,16 @@ function gameReducer(state: GameState, action: GameAction): GameState {
           feedbackType: 'wrong',
           feedbackMessage: reason ?? 'Mot invalide',
           lastWord: word,
+          lastFailedSyllable: state.currentSyllable,
         };
       }
 
       // Correct word
       const newWordsUsed = new Set(state.wordsUsed);
       newWordsUsed.add(word.toLowerCase());
-
       const newWordCount = state.wordCount + 1;
       const newScore = state.score + score;
 
-      // Speed up timer every N words
       let newMaxTimer = state.maxTimerMs;
       if (newWordCount % GAME_CONFIG.SPEED_UP_EVERY_N_WORDS === 0) {
         newMaxTimer = Math.max(
@@ -111,11 +110,9 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         );
       }
 
-      const nextSyllable = syllable ?? getNextSyllable(state.currentSyllable);
-
       return {
         ...state,
-        currentSyllable: nextSyllable,
+        currentSyllable: syllable ?? getNextSyllable(state.currentSyllable),
         timerMs: newMaxTimer,
         maxTimerMs: newMaxTimer,
         score: newScore,
@@ -124,6 +121,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         feedbackType: 'correct',
         feedbackMessage: `✓ ${word}`,
         lastWord: word,
+        lastFailedSyllable: null,
       };
     }
 
@@ -134,7 +132,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return state.status === 'paused' ? { ...state, status: 'playing' } : state;
 
     case 'RESET':
-      return { ...INITIAL_STATE, currentSyllable: getNextSyllable(null) };
+      return makeInitialState(action.payload?.initialTimerMs ?? GAME_CONFIG.INITIAL_TIMER_MS);
 
     default:
       return state;
@@ -143,27 +141,24 @@ function gameReducer(state: GameState, action: GameAction): GameState {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useGame(maxWords: number = GAME_CONFIG.DEFAULT_MAX_SYLLABLE_COVERAGE) {
-  const [state, dispatch] = useReducer(gameReducer, INITIAL_STATE);
+export function useGame(
+  maxWords: number = GAME_CONFIG.DEFAULT_MAX_SYLLABLE_COVERAGE,
+  initialTimerMs: number = GAME_CONFIG.INITIAL_TIMER_MS,
+) {
+  const [state, dispatch] = useReducer(gameReducer, makeInitialState(initialTimerMs));
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const TICK_MS = 100;
 
-  // ── Timer management ──
+  // ── Timer ──
   useEffect(() => {
     if (state.status === 'playing') {
       timerRef.current = setInterval(() => {
         dispatch({ type: 'TICK', payload: { elapsed: TICK_MS } });
       }, TICK_MS);
     } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [state.status]);
 
   // ── Timeout detection ──
@@ -175,70 +170,39 @@ export function useGame(maxWords: number = GAME_CONFIG.DEFAULT_MAX_SYLLABLE_COVE
 
   // ── Actions ──
   const startGame = useCallback(() => {
-    dispatch({ type: 'START' });
-  }, []);
+    dispatch({ type: 'START', payload: { initialTimerMs } });
+  }, [initialTimerMs]);
 
-  const submitWord = useCallback(
-    async (word: string) => {
-      if (state.status !== 'playing') return;
+  const submitWord = useCallback(async (word: string) => {
+    if (state.status !== 'playing') return;
+    const trimmed = word.trim().toLowerCase();
 
-      const trimmed = word.trim().toLowerCase();
+    if (state.wordsUsed.has(trimmed)) {
+      dispatch({ type: 'SUBMIT_WORD', payload: { word: trimmed, correct: false, reason: `"${trimmed}" déjà utilisé !` } });
+      return;
+    }
 
-      // Check if already used
-      if (state.wordsUsed.has(trimmed)) {
-        dispatch({
-          type: 'SUBMIT_WORD',
-          payload: {
-            word: trimmed,
-            correct: false,
-            reason: `"${trimmed}" déjà utilisé !`,
-          },
-        });
-        return;
-      }
+    const { valid, reason } = await validateWord(trimmed, state.currentSyllable);
+    if (!valid) {
+      dispatch({ type: 'SUBMIT_WORD', payload: { word: trimmed, correct: false, reason } });
+      return;
+    }
 
-      // Validate via SQLite
-      const { valid, reason } = await validateWord(trimmed, state.currentSyllable);
+    const timeRatio = state.timerMs / state.maxTimerMs;
+    const timeBonus = timeRatio > 0.5 ? GAME_CONFIG.FAST_ANSWER_BONUS : 1.0;
+    const wordScore = Math.round(GAME_CONFIG.BASE_SCORE_PER_WORD * timeBonus * (trimmed.length / 5));
+    const nextSyllable = getNextSyllable(state.currentSyllable, maxWords);
 
-      if (!valid) {
-        dispatch({
-          type: 'SUBMIT_WORD',
-          payload: { word: trimmed, correct: false, reason },
-        });
-        return;
-      }
+    dispatch({ type: 'SUBMIT_WORD', payload: { word: trimmed, correct: true, syllable: nextSyllable, score: wordScore } });
+  }, [state, maxWords]);
 
-      // Calculate score: base + time bonus
-      const timeRatio = state.timerMs / state.maxTimerMs;
-      const timeBonus = timeRatio > 0.5 ? GAME_CONFIG.FAST_ANSWER_BONUS : 1.0;
-      const wordScore = Math.round(
-        GAME_CONFIG.BASE_SCORE_PER_WORD * timeBonus * (trimmed.length / 5)
-      );
-
-      const nextSyllable = getNextSyllable(state.currentSyllable, maxWords);
-      dispatch({
-        type: 'SUBMIT_WORD',
-        payload: {
-          word: trimmed,
-          correct: true,
-          syllable: nextSyllable,
-          score: wordScore,
-        },
-      });
-    },
-    [state]
-  );
-
-  const pauseGame = useCallback(() => dispatch({ type: 'PAUSE' }), []);
+  const pauseGame  = useCallback(() => dispatch({ type: 'PAUSE' }), []);
   const resumeGame = useCallback(() => dispatch({ type: 'RESUME' }), []);
-  const resetGame = useCallback(() => dispatch({ type: 'RESET' }), []);
-
-  // Progress 0–1
-  const timerProgress = state.timerMs / state.maxTimerMs;
+  const resetGame  = useCallback(() => dispatch({ type: 'RESET', payload: { initialTimerMs } }), [initialTimerMs]);
 
   return {
     state,
-    timerProgress,
+    timerProgress: state.timerMs / state.maxTimerMs,
     startGame,
     submitWord,
     pauseGame,

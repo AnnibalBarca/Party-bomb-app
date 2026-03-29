@@ -14,6 +14,8 @@ export interface GameState {
   feedbackType: FeedbackType;
   feedbackMessage: string;
   lastWord: string;
+  /** Syllabe sur laquelle le joueur a échoué — pour afficher des mots exemples */
+  lastFailedSyllable: string | null;
 }
 
 export interface GameAction {
@@ -32,6 +34,7 @@ export interface GameAction {
     elapsed?: number;
     syllable?: string;
     score?: number;
+    initialTimerMs?: number;
   };
 }
 
